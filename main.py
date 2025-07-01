@@ -387,6 +387,149 @@ class ModelLoader:
         answer = self.generate_answer(test_context, test_question)
         return answer
 
+# Add this after the ModelLoader class
+
+class PDFQASystem:
+    def __init__(self):
+        self.doc_processor = DocumentProcessor()
+        self.embedding_manager = EmbeddingManager()
+        self.vector_db = VectorDatabase()
+        self.model_loader = ModelLoader()
+        self.is_ready = False
+        self.pdf_processed = False
+        
+    def setup(self):
+        """Initialize all components"""
+        print("Setting up PDF QA System...")
+        print("This may take a few minutes on first run...")
+        
+        try:
+            # Load embedding model
+            print("1/2 Loading embedding model...")
+            if not self.embedding_manager.load_embedding_model():
+                return False
+            
+            # Load language model
+            print("2/2 Loading language model...")
+            if not self.model_loader.load_model():
+                return False
+            
+            self.is_ready = True
+            print("✅ PDF QA System ready!")
+            return True
+            
+        except Exception as e:
+            print(f"❌ Error setting up system: {str(e)}")
+            return False
+        
+    def process_pdf(self, pdf_file_path):
+        """Process uploaded PDF"""
+        if not self.is_ready:
+            return "❌ System not ready. Please run setup() first."
+        
+        try:
+            print(f"Processing PDF: {pdf_file_path}")
+            
+            # Check if file exists
+            if not os.path.exists(pdf_file_path):
+                return f"❌ File not found: {pdf_file_path}"
+            
+            # Extract text from PDF
+            print("Extracting text from PDF...")
+            text = self.doc_processor.extract_text_from_pdf(pdf_file_path)
+            
+            if not text.strip():
+                return "❌ No text could be extracted from the PDF"
+            
+            # Split into chunks
+            print("Splitting text into chunks...")
+            chunks = self.doc_processor.split_text_into_chunks(text)
+            
+            if not chunks:
+                return "❌ No chunks created from the text"
+            
+            # Generate embeddings
+            print("Generating embeddings...")
+            if not self.embedding_manager.generate_embeddings(chunks):
+                return "❌ Failed to generate embeddings"
+            
+            # Build vector database
+            print("Building vector database...")
+            if not self.vector_db.build_index(self.embedding_manager.embeddings, chunks):
+                return "❌ Failed to build vector database"
+            
+            self.pdf_processed = True
+            return f"✅ PDF processed successfully! Created {len(chunks)} chunks for analysis."
+            
+        except Exception as e:
+            return f"❌ Error processing PDF: {str(e)}"
+    
+    def answer_question(self, question: str, top_k=3) -> str:
+        """Answer question based on processed PDF"""
+        if not self.is_ready:
+            return "❌ System not ready. Please run setup() first."
+            
+        if not self.pdf_processed:
+            return "❌ No PDF processed yet. Please upload and process a PDF first."
+        
+        if not question.strip():
+            return "❌ Please provide a valid question."
+        
+        try:
+            print(f"Answering question: {question}")
+            
+            # Generate query embedding
+            print("Generating query embedding...")
+            query_embedding = self.embedding_manager.model.encode([question])[0]
+            
+            # Search for relevant chunks
+            print("Searching for relevant information...")
+            results = self.vector_db.search(query_embedding, k=top_k)
+            
+            if not results:
+                return "❌ No relevant information found in the document."
+            
+            # Combine top results as context
+            context_parts = []
+            for i, result in enumerate(results):
+                context_parts.append(f"[Context {i+1}]: {result['chunk']}")
+            
+            context = "\n\n".join(context_parts)
+            
+            # Generate answer
+            print("Generating answer...")
+            answer = self.model_loader.generate_answer(context, question)
+            
+            # Format response with sources
+            response = f"**Answer:** {answer}\n\n"
+            response += f"**Sources used ({len(results)} most relevant chunks):**\n"
+            
+            for i, result in enumerate(results):
+                response += f"{i+1}. Score: {result['score']:.3f} - {result['chunk'][:100]}...\n"
+            
+            return response
+            
+        except Exception as e:
+            return f"❌ Error generating answer: {str(e)}"
+    
+    def get_system_status(self):
+        """Get current system status"""
+        status = {
+            'embedding_model_loaded': self.embedding_manager.model is not None,
+            'language_model_loaded': self.model_loader.model is not None,
+            'system_ready': self.is_ready,
+            'pdf_processed': self.pdf_processed,
+            'chunks_count': len(self.embedding_manager.chunks) if self.embedding_manager.chunks else 0
+        }
+        return status
+
+# Initialize the complete system
+print("\n" + "="*50)
+print("Initializing Complete PDF QA System...")
+qa_system = PDFQASystem()
+print("PDF QA System created!")
+
+
 # Test the Model Loader
 print("\n" + "="*50)
 print("Testing Model Loader...")
@@ -551,3 +694,67 @@ if model_loader.load_model():
 else:
     print("❌ Failed to load model")
     print("💡 Tip: Try using a smaller model like 'gpt2' if you have memory issues")
+
+# Test the complete PDF QA System
+print("\n" + "="*50)
+print("Testing Complete PDF QA System...")
+
+# Check initial status
+print("Initial system status:")
+status = qa_system.get_system_status()
+for key, value in status.items():
+    print(f"  {key}: {value}")
+
+# Setup the system
+print("\nSetting up the system...")
+if qa_system.setup():
+    print("✅ System setup completed!")
+    
+    # Check status after setup
+    print("\nSystem status after setup:")
+    status = qa_system.get_system_status()
+    for key, value in status.items():
+        print(f"  {key}: {value}")
+    
+    # Test with sample text (simulating PDF processing)
+    print("\nTesting with sample data...")
+    
+    # Manually add sample data to test the Q&A functionality
+    sample_chunks = [
+        "Python is a high-level programming language known for its simplicity and readability. It was created by Guido van Rossum and first released in 1991.",
+        "Machine learning is a subset of artificial intelligence that focuses on algorithms that can learn from data. Python is widely used in machine learning.",
+        "Natural language processing (NLP) is a field of AI that helps computers understand human language. Libraries like NLTK and spaCy are popular in Python."
+    ]
+    
+    # Process sample data
+    if qa_system.embedding_manager.generate_embeddings(sample_chunks):
+        if qa_system.vector_db.build_index(qa_system.embedding_manager.embeddings, sample_chunks):
+            qa_system.pdf_processed = True
+            print("✅ Sample data processed successfully!")
+            
+            # Test questions
+            test_questions = [
+                "What is Python?",
+                "Who created Python?",
+                "What is machine learning?",
+                "What libraries are used for NLP in Python?"
+            ]
+            
+            print("\nTesting Q&A functionality:")
+            for question in test_questions:
+                print(f"\n{'='*30}")
+                print(f"Question: {question}")
+                print("="*30)
+                answer = qa_system.answer_question(question)
+                print(answer)
+        else:
+            print("❌ Failed to build vector database with sample data")
+    else:
+        print("❌ Failed to generate embeddings for sample data")
+        
+else:
+    print("❌ System setup failed")
+
+print("\n" + "="*50)
+print("PDF QA System testing completed!")
+print("Next step: Create Gradio interface for user interaction")
