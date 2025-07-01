@@ -268,6 +268,132 @@ class VectorDatabase:
             print(f"Error loading index: {str(e)}")
             return False
 
+
+# Alternative lightweight models (add this as a comment in your code)
+# For low memory systems, you can use:
+# - "gpt2" (smaller, faster)
+# - "microsoft/DialoGPT-small" (current choice)
+# - "distilgpt2" (even smaller)
+
+# To change model, modify this line in ModelLoader.__init__:
+# self.model_name = "gpt2"  # or any other model
+
+
+# Add this after the VectorDatabase class
+
+
+
+class ModelLoader:
+    def __init__(self, model_name="microsoft/DialoGPT-small"):
+        self.model_name = model_name
+        self.tokenizer = None
+        self.model = None
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        
+    def load_model(self):
+        """Load the language model and tokenizer"""
+        print(f"Loading model: {self.model_name}")
+        print(f"Using device: {self.device}")
+        
+        try:
+            # Load tokenizer
+            print("Loading tokenizer...")
+            self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+            
+            # Add padding token if it doesn't exist
+            if self.tokenizer.pad_token is None:
+                self.tokenizer.pad_token = self.tokenizer.eos_token
+                print("Added padding token")
+            
+            # Load model
+            print("Loading model...")
+            self.model = AutoModelForCausalLM.from_pretrained(
+                self.model_name,
+                torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
+                device_map="auto" if self.device == "cuda" else None,
+                low_cpu_mem_usage=True
+            )
+            
+            # Move model to device if not using device_map
+            if self.device == "cpu":
+                self.model = self.model.to(self.device)
+            
+            print("Model loaded successfully!")
+            return True
+            
+        except Exception as e:
+            print(f"Error loading model: {str(e)}")
+            return False
+    
+    def generate_answer(self, context: str, question: str, max_length=150) -> str:
+        """Generate answer based on context and question"""
+        if self.model is None or self.tokenizer is None:
+            return "Model not loaded. Please load the model first."
+        
+        try:
+            # Create prompt
+            prompt = f"Context: {context[:1000]}\n\nQuestion: {question}\n\nAnswer:"
+            
+            # Tokenize input
+            inputs = self.tokenizer.encode(
+                prompt, 
+                return_tensors="pt", 
+                max_length=512, 
+                truncation=True
+            )
+            
+            # Move inputs to device
+            inputs = inputs.to(self.device)
+            
+            # Generate response
+            with torch.no_grad():
+                outputs = self.model.generate(
+                    inputs,
+                    max_length=inputs.shape[1] + max_length,
+                    num_return_sequences=1,
+                    temperature=0.7,
+                    do_sample=True,
+                    pad_token_id=self.tokenizer.eos_token_id,
+                    eos_token_id=self.tokenizer.eos_token_id,
+                    no_repeat_ngram_size=2
+                )
+            
+            # Decode response
+            full_response = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
+            
+            # Extract only the answer part
+            if "Answer:" in full_response:
+                answer = full_response.split("Answer:")[-1].strip()
+            else:
+                answer = full_response[len(prompt):].strip()
+            
+            # Clean up the answer
+            answer = answer.split('\n')[0].strip()  # Take first line only
+            
+            return answer if answer else "I couldn't generate a proper answer."
+            
+        except Exception as e:
+            print(f"Error generating answer: {str(e)}")
+            return f"Error generating answer: {str(e)}"
+    
+    def test_generation(self):
+        """Test the model with a simple prompt"""
+        if self.model is None:
+            return "Model not loaded"
+        
+        test_context = "Python is a programming language. It is easy to learn and powerful."
+        test_question = "What is Python?"
+        
+        answer = self.generate_answer(test_context, test_question)
+        return answer
+
+# Test the Model Loader
+print("\n" + "="*50)
+print("Testing Model Loader...")
+model_loader = ModelLoader()
+print("Model Loader initialized!")
+
+
 # Test the Vector Database
 print("\n" + "="*50)
 print("Testing Vector Database...")
@@ -393,3 +519,35 @@ else:
     print("❌ No embeddings available for testing")
 
 
+# Test model loading and generation
+print("\n" + "="*50)
+print("Testing Model Loading and Generation...")
+
+print("⚠️  Note: This will download the model (about 500MB) on first run...")
+print("Loading language model...")
+
+if model_loader.load_model():
+    print("✅ Model loaded successfully!")
+    
+    # Test basic generation
+    print("\nTesting basic text generation...")
+    test_answer = model_loader.test_generation()
+    print(f"Test Answer: {test_answer}")
+    
+    # Test with our sample data
+    if len(embedding_manager.chunks) > 0:
+        print("\nTesting with sample context...")
+        sample_context = embedding_manager.chunks[0]
+        sample_question = "What is this document about?"
+        
+        answer = model_loader.generate_answer(sample_context, sample_question)
+        print(f"Question: {sample_question}")
+        print(f"Context: {sample_context[:100]}...")
+        print(f"Answer: {answer}")
+        print("✅ Context-based generation works!")
+    else:
+        print("❌ No sample chunks available for testing")
+        
+else:
+    print("❌ Failed to load model")
+    print("💡 Tip: Try using a smaller model like 'gpt2' if you have memory issues")

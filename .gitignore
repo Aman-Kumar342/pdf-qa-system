@@ -40,3 +40,6 @@ models/
 *.faiss
 *_chunks.pkl
 test_*
+
+.cache/
+transformers_cache/
