@@ -523,6 +523,442 @@ class PDFQASystem:
         }
         return status
 
+# Add this after the PDFQASystem class
+class GradioInterface:
+    def __init__(self):
+        self.qa_system = PDFQASystem()
+        self.setup_complete = False
+        
+    def initialize_system(self):
+        """Initialize the QA system"""
+        try:
+            success = self.qa_system.setup()
+            if success:
+                self.setup_complete = True
+                return "✅ System initialized successfully! You can now upload a PDF."
+            else:
+                return "❌ Failed to initialize system. Please check the logs."
+        except Exception as e:
+            return f"❌ Error initializing system: {str(e)}"
+    
+    def upload_pdf(self, pdf_file):
+        """Handle PDF upload and processing"""
+        if not self.setup_complete:
+            return "❌ Please initialize the system first.", ""
+        
+        if pdf_file is None:
+            return "❌ Please upload a PDF file.", ""
+        
+        try:
+            # Process the uploaded PDF
+            result = self.qa_system.process_pdf(pdf_file.name)
+            
+            if "✅" in result:
+                # Get document preview
+                if self.qa_system.embedding_manager.chunks:
+                    preview = "📄 **Document Preview:**\n\n"
+                    preview += f"Total chunks: {len(self.qa_system.embedding_manager.chunks)}\n\n"
+                    preview += "**First few chunks:**\n"
+                    for i, chunk in enumerate(self.qa_system.embedding_manager.chunks[:3]):
+                        preview += f"\n**Chunk {i+1}:** {chunk[:200]}...\n"
+                    return result, preview
+                else:
+                    return result, "No preview available."
+            else:
+                return result, ""
+                
+        except Exception as e:
+            return f"❌ Error processing PDF: {str(e)}", ""
+    
+    def answer_question(self, question, history):
+        """Handle question answering"""
+        if not self.setup_complete:
+            return history + [("System not ready", "❌ Please initialize the system first.")]
+        
+        if not self.qa_system.pdf_processed:
+            return history + [(question, "❌ Please upload and process a PDF first.")]
+        
+        if not question.strip():
+            return history + [("", "❌ Please enter a valid question.")]
+        
+        try:
+            # Get answer from QA system
+            answer = self.qa_system.answer_question(question)
+            
+            # Add to chat history
+            history.append((question, answer))
+            return history
+            
+        except Exception as e:
+            error_msg = f"❌ Error answering question: {str(e)}"
+            history.append((question, error_msg))
+            return history
+    
+    def get_system_info(self):
+        """Get current system status information"""
+        status = self.qa_system.get_system_status()
+        
+        info = "🔧 **System Status:**\n\n"
+        info += f"• Embedding Model: {'✅ Loaded' if status['embedding_model_loaded'] else '❌ Not loaded'}\n"
+        info += f"• Language Model: {'✅ Loaded' if status['language_model_loaded'] else '❌ Not loaded'}\n"
+        info += f"• System Ready: {'✅ Yes' if status['system_ready'] else '❌ No'}\n"
+        info += f"• PDF Processed: {'✅ Yes' if status['pdf_processed'] else '❌ No'}\n"
+        info += f"• Document Chunks: {status['chunks_count']}\n"
+        
+        return info
+    
+    # 👇 NEW METHODS FROM STEP 8.2 - ADD THESE
+    def export_chat(self, history):
+        """Export chat history"""
+        if not history:
+            return "No conversation to export."
+        
+        export_text = "# PDF Q&A Chat Export\n\n"
+        for i, (question, answer) in enumerate(history, 1):
+            export_text += f"## Exchange {i}\n"
+            export_text += f"**Question:** {question}\n\n"
+            export_text += f"**Answer:** {answer}\n\n"
+            export_text += "---\n\n"
+        
+        filename = f"chat_export_{__import__('datetime').datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
+        with open(filename, 'w', encoding='utf-8') as f:
+            f.write(export_text)
+        
+        return f"✅ Chat exported to {filename}"
+
+    def get_document_stats(self):
+        """Get document statistics"""
+        if not self.qa_system.pdf_processed:
+            return "No document processed."
+        
+        chunks = self.qa_system.embedding_manager.chunks
+        total_chars = sum(len(chunk) for chunk in chunks)
+        avg_chunk_size = total_chars / len(chunks) if chunks else 0
+        
+        stats = f"""
+📊 **Document Statistics:**
+
+• Total Chunks: {len(chunks)}
+• Total Characters: {total_chars:,}
+• Average Chunk Size: {avg_chunk_size:.0f} characters
+• Embedding Dimension: {self.qa_system.embedding_manager.embeddings.shape[1] if self.qa_system.embedding_manager.embeddings is not None else 'N/A'}
+• Vector Database Size: {self.qa_system.vector_db.index.ntotal if self.qa_system.vector_db.index else 0} vectors
+        """
+        
+        return stats
+
+    def create_enhanced_interface(self):
+        """Create enhanced Gradio interface with additional features"""
+        
+        css = """
+        .gradio-container {
+            font-family: 'Arial', sans-serif;
+        }
+        .main-header {
+            text-align: center;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+        .feature-box {
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 10px 0;
+            background-color: #f9f9f9;
+        }
+        """
+        
+        with gr.Blocks(css=css, title="Enhanced PDF Q&A System") as interface:
+            
+            gr.HTML("""
+            <div class="main-header">
+                <h1>📚 Enhanced PDF Question-Answering System</h1>
+                <p>Upload, analyze, and interact with your PDF documents using AI!</p>
+            </div>
+            """)
+            
+            with gr.Tabs():
+                # Main Q&A Tab
+                with gr.TabItem("🔍 Question & Answer"):
+                    with gr.Row():
+                        with gr.Column(scale=1):
+                            gr.Markdown("## 🚀 Setup")
+                            init_btn = gr.Button("Initialize System", variant="primary")
+                            init_output = gr.Textbox(label="Status", interactive=False)
+                            
+                            gr.Markdown("## 📄 Upload Document")
+                            pdf_input = gr.File(label="PDF Document", file_types=[".pdf"])
+                            upload_btn = gr.Button("Process PDF", variant="secondary")
+                            upload_output = gr.Textbox(label="Processing Status", interactive=False)
+                            
+                        with gr.Column(scale=2):
+                            gr.Markdown("## 💬 Chat with Document")
+                            chatbot = gr.Chatbot(height=400, show_label=True)
+                            
+                            with gr.Row():
+                                question_input = gr.Textbox(
+                                    label="Your Question",
+                                    placeholder="Ask anything about the document...",
+                                    scale=4
+                                )
+                                ask_btn = gr.Button("Ask", variant="primary", scale=1)
+                            
+                            with gr.Row():
+                                clear_btn = gr.Button("Clear Chat")
+                                export_btn = gr.Button("Export Chat")
+                            
+                            export_status = gr.Textbox(label="Export Status", interactive=False)
+                
+                # Document Analysis Tab
+                with gr.TabItem("📊 Document Analysis"):
+                    with gr.Row():
+                        with gr.Column():
+                            gr.Markdown("## 📈 Document Statistics")
+                            stats_btn = gr.Button("Get Statistics")
+                            stats_output = gr.Markdown()
+                            
+                            gr.Markdown("## 💡 Suggested Questions")
+                            suggestions_btn = gr.Button("Get Question Suggestions")
+                            suggestions_output = gr.Markdown()
+                        
+                        with gr.Column():
+                            gr.Markdown("## 📋 Document Preview")
+                            preview_output = gr.Markdown()
+                            
+                            gr.Markdown("## 🔧 System Status")
+                            status_btn = gr.Button("Check System Status")
+                            status_output = gr.Markdown()
+            
+            # Event handlers for main tab
+            init_btn.click(fn=self.initialize_system, outputs=init_output)
+            upload_btn.click(fn=self.upload_pdf, inputs=pdf_input, outputs=[upload_output, preview_output])
+            ask_btn.click(fn=self.answer_question, inputs=[question_input, chatbot], outputs=chatbot).then(lambda: "", outputs=question_input)
+            question_input.submit(fn=self.answer_question, inputs=[question_input, chatbot], outputs=chatbot).then(lambda: "", outputs=question_input)
+            clear_btn.click(lambda: [], outputs=chatbot)
+            export_btn.click(fn=self.export_chat, inputs=chatbot, outputs=export_status)
+            
+            # Event handlers for analysis tab
+            stats_btn.click(fn=self.get_document_stats, outputs=stats_output)
+            status_btn.click(fn=self.get_system_info, outputs=status_output)
+            suggestions_btn.click(
+                fn=lambda: "💡 **Suggested Questions:**\n\n" + "\n".join([f"• {q}" for q in [
+                    "What is the main topic of this document?",
+                    "What are the key findings or conclusions?",
+                    "Who are the main authors mentioned?",
+                    "What methodology is described?",
+                    "What are the important numbers or dates?",
+                    "What recommendations are provided?"
+                ]]),
+                outputs=suggestions_output
+            )
+        
+        return interface
+    
+    def create_interface(self):
+        """Create and configure Gradio interface"""
+        
+        # Custom CSS for better styling
+        css = """
+        .gradio-container {
+            font-family: 'Arial', sans-serif;
+        }
+        .main-header {
+            text-align: center;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+        """
+        
+        with gr.Blocks(css=css, title="PDF Question-Answering System") as interface:
+            
+            # Header
+            gr.HTML("""
+            <div class="main-header">
+                <h1>📚 PDF Question-Answering System</h1>
+                <p>Upload a PDF document and ask questions about its content!</p>
+            </div>
+            """)
+            
+            with gr.Row():
+                with gr.Column(scale=1):
+                    # System initialization
+                    gr.Markdown("## 🚀 Step 1: Initialize System")
+                    init_btn = gr.Button("Initialize System", variant="primary")
+                    init_output = gr.Textbox(label="Initialization Status", interactive=False)
+                    
+                    # PDF Upload
+                    gr.Markdown("## 📄 Step 2: Upload PDF")
+                    pdf_input = gr.File(
+                        label="Upload PDF Document", 
+                        file_types=[".pdf"]
+                    )
+                    upload_btn = gr.Button("Process PDF", variant="secondary")
+                    upload_output = gr.Textbox(label="Processing Status", interactive=False)
+                    
+                    # System Status
+                    gr.Markdown("## ℹ️ System Information")
+                    status_btn = gr.Button("Check Status")
+                    status_output = gr.Markdown()
+                
+                with gr.Column(scale=2):
+                    # Document Preview
+                    gr.Markdown("## 👀 Document Preview")
+                    preview_output = gr.Markdown()
+                    
+                    # Question-Answer Interface
+                    gr.Markdown("## ❓ Ask Questions")
+                    chatbot = gr.Chatbot(
+                        label="Q&A Chat",
+                        height=400,
+                        show_label=True
+                    )
+                    
+                    with gr.Row():
+                        question_input = gr.Textbox(
+                            label="Your Question",
+                            placeholder="Ask anything about the uploaded document...",
+                            scale=4
+                        )
+                        ask_btn = gr.Button("Ask", variant="primary", scale=1)
+                    
+                    # Clear chat button
+                    clear_btn = gr.Button("Clear Chat", variant="stop")
+            
+            # Example questions
+            gr.Markdown("""
+            ## 💡 Example Questions You Can Ask:
+            - What is the main topic of this document?
+            - Can you summarize the key points?
+            - What are the conclusions mentioned?
+            - Who are the authors mentioned?
+            - What methodology was used?
+            """)
+            
+            # Event handlers
+            init_btn.click(
+                fn=self.initialize_system,
+                outputs=init_output
+            )
+            
+            upload_btn.click(
+                fn=self.upload_pdf,
+                inputs=pdf_input,
+                outputs=[upload_output, preview_output]
+            )
+            
+            ask_btn.click(
+                fn=self.answer_question,
+                inputs=[question_input, chatbot],
+                outputs=chatbot
+            ).then(
+                lambda: "",  # Clear the input box
+                outputs=question_input
+            )
+            
+            question_input.submit(
+                fn=self.answer_question,
+                inputs=[question_input, chatbot],
+                outputs=chatbot
+            ).then(
+                lambda: "",  # Clear the input box
+                outputs=question_input
+            )
+            
+            clear_btn.click(
+                lambda: [],
+                outputs=chatbot
+            )
+            
+            status_btn.click(
+                fn=self.get_system_info,
+                outputs=status_output
+            )
+        
+        return interface
+
+
+# Add this after the GradioInterface class
+
+class AdvancedFeatures:
+    def __init__(self, qa_system):
+        self.qa_system = qa_system
+        self.conversation_history = []
+        
+    def save_conversation(self, question, answer):
+        """Save conversation for context"""
+        self.conversation_history.append({
+            'question': question,
+            'answer': answer,
+            'timestamp': __import__('datetime').datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        })
+    
+    def export_conversation(self):
+        """Export conversation history"""
+        if not self.conversation_history:
+            return "No conversation to export."
+        
+        export_text = "# PDF Q&A Conversation History\n\n"
+        for i, conv in enumerate(self.conversation_history, 1):
+            export_text += f"## Question {i} ({conv['timestamp']})\n"
+            export_text += f"**Q:** {conv['question']}\n\n"
+            export_text += f"**A:** {conv['answer']}\n\n"
+            export_text += "---\n\n"
+        
+        # Save to file
+        filename = f"conversation_export_{__import__('datetime').datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
+        with open(filename, 'w', encoding='utf-8') as f:
+            f.write(export_text)
+        
+        return f"✅ Conversation exported to {filename}"
+    
+    def get_document_summary(self):
+        """Generate document summary"""
+        if not self.qa_system.pdf_processed:
+            return "No document processed yet."
+        
+        # Use first few chunks to create summary
+        chunks = self.qa_system.embedding_manager.chunks[:5]
+        combined_text = " ".join(chunks)
+        
+        summary_question = "What is the main topic and key points of this document?"
+        summary = self.qa_system.answer_question(summary_question)
+        
+        return f"📋 **Document Summary:**\n\n{summary}"
+    
+    def suggest_questions(self):
+        """Suggest relevant questions based on document content"""
+        if not self.qa_system.pdf_processed:
+            return []
+        
+        # Analyze document content and suggest questions
+        suggestions = [
+            "What is the main topic of this document?",
+            "What are the key findings or conclusions?",
+            "Who are the main authors or contributors mentioned?",
+            "What methodology or approach is described?",
+            "What are the important dates or numbers mentioned?",
+            "What recommendations are provided?",
+            "What are the limitations or challenges discussed?",
+            "What future work or next steps are suggested?"
+        ]
+        
+        return suggestions
+
+
+# Create and launch the Gradio interface
+print("\n" + "="*50)
+print("Creating Gradio Interface...")
+gradio_app = GradioInterface()
+interface = gradio_app.create_interface()
+print("Gradio Interface created successfully!")
+
+
 # Initialize the complete system
 print("\n" + "="*50)
 print("Initializing Complete PDF QA System...")
@@ -758,3 +1194,27 @@ else:
 print("\n" + "="*50)
 print("PDF QA System testing completed!")
 print("Next step: Create Gradio interface for user interaction")
+
+
+# Launch the application
+# Replace the launch code at the end of main.py
+if __name__ == "__main__":
+    print("\n" + "="*50)
+    print("🚀 Launching Enhanced PDF Question-Answering System...")
+    print("="*50)
+    
+    try:
+        # Create enhanced interface
+        gradio_app = GradioInterface()
+        interface = gradio_app.create_enhanced_interface()  # Use enhanced interface
+        
+        # Launch with enhanced features
+        interface.launch(
+            server_name="127.0.0.1",
+            server_port=7860,
+            share=False,
+            debug=True,
+            show_error=True
+        )
+    except Exception as e:
+        print(f"❌ Error launching interface: {str(e)}")
