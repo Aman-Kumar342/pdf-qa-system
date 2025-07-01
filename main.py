@@ -882,6 +882,88 @@ class GradioInterface:
         
         return interface
 
+# Add this after the GradioInterface class
+
+import time
+import psutil
+import threading
+
+class PerformanceMonitor:
+    def __init__(self):
+        self.metrics = {
+            'processing_times': [],
+            'memory_usage': [],
+            'query_response_times': [],
+            'system_load': []
+        }
+        self.monitoring = False
+        
+    def start_monitoring(self):
+        """Start system monitoring"""
+        self.monitoring = True
+        monitor_thread = threading.Thread(target=self._monitor_system)
+        monitor_thread.daemon = True
+        monitor_thread.start()
+        
+    def stop_monitoring(self):
+        """Stop system monitoring"""
+        self.monitoring = False
+        
+    def _monitor_system(self):
+        """Monitor system resources"""
+        while self.monitoring:
+            try:
+                # Get system metrics
+                memory_percent = psutil.virtual_memory().percent
+                cpu_percent = psutil.cpu_percent()
+                
+                self.metrics['memory_usage'].append(memory_percent)
+                self.metrics['system_load'].append(cpu_percent)
+                
+                time.sleep(5)  # Monitor every 5 seconds
+            except:
+                pass
+                
+    def log_processing_time(self, operation, duration):
+        """Log processing time for operations"""
+        self.metrics['processing_times'].append({
+            'operation': operation,
+            'duration': duration,
+            'timestamp': time.time()
+        })
+        
+    def log_query_time(self, duration):
+        """Log query response time"""
+        self.metrics['query_response_times'].append(duration)
+        
+    def get_performance_report(self):
+        """Generate performance report"""
+        report = "📈 **Performance Report**\n\n"
+        
+        # Processing times
+        if self.metrics['processing_times']:
+            avg_processing = sum(p['duration'] for p in self.metrics['processing_times']) / len(self.metrics['processing_times'])
+            report += f"• Average Processing Time: {avg_processing:.2f} seconds\n"
+            
+        # Query response times
+        if self.metrics['query_response_times']:
+            avg_query = sum(self.metrics['query_response_times']) / len(self.metrics['query_response_times'])
+            report += f"• Average Query Response: {avg_query:.2f} seconds\n"
+            
+        # Memory usage
+        if self.metrics['memory_usage']:
+            avg_memory = sum(self.metrics['memory_usage']) / len(self.metrics['memory_usage'])
+            max_memory = max(self.metrics['memory_usage'])
+            report += f"• Average Memory Usage: {avg_memory:.1f}%\n"
+            report += f"• Peak Memory Usage: {max_memory:.1f}%\n"
+            
+        # System load
+        if self.metrics['system_load']:
+            avg_cpu = sum(self.metrics['system_load']) / len(self.metrics['system_load'])
+            report += f"• Average CPU Usage: {avg_cpu:.1f}%\n"
+            
+        return report
+
 
 # Add this after the GradioInterface class
 
