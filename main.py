@@ -144,6 +144,137 @@ class EmbeddingManager:
             print(f"Error loading embeddings: {str(e)}")
             return False
 
+# Add this after the EmbeddingManager class
+
+class VectorDatabase:
+    def __init__(self):
+        self.index = None
+        self.chunks = []
+        self.dimension = None
+        
+    def build_index(self, embeddings, chunks):
+        """Build FAISS index from embeddings"""
+        if embeddings is None or len(embeddings) == 0:
+            print("No embeddings provided to build index")
+            return False
+            
+        try:
+            print("Building FAISS index...")
+            self.dimension = embeddings.shape[1]
+            
+            # Create FAISS index (Inner Product for cosine similarity)
+            self.index = faiss.IndexFlatIP(self.dimension)
+            
+            # Normalize embeddings for cosine similarity
+            embeddings_normalized = embeddings.copy()
+            faiss.normalize_L2(embeddings_normalized)
+            
+            # Add embeddings to index
+            self.index.add(embeddings_normalized.astype('float32'))
+            self.chunks = chunks
+            
+            print(f"FAISS index built successfully!")
+            print(f"Index contains {self.index.ntotal} vectors of dimension {self.dimension}")
+            return True
+            
+        except Exception as e:
+            print(f"Error building FAISS index: {str(e)}")
+            return False
+        
+    def search(self, query_embedding, k=3):
+        """Search for most similar chunks"""
+        if self.index is None:
+            print("No index built yet!")
+            return []
+            
+        if k > len(self.chunks):
+            k = len(self.chunks)
+            
+        try:
+            # Prepare query embedding
+            query_embedding = np.array([query_embedding]).astype('float32')
+            faiss.normalize_L2(query_embedding)
+            
+            # Search
+            scores, indices = self.index.search(query_embedding, k)
+            
+            # Prepare results
+            results = []
+            for i, (score, idx) in enumerate(zip(scores[0], indices[0])):
+                if idx < len(self.chunks):  # Safety check
+                    results.append({
+                        'chunk': self.chunks[idx],
+                        'score': float(score),
+                        'index': int(idx),
+                        'rank': i + 1
+                    })
+            
+            print(f"Found {len(results)} similar chunks")
+            return results
+            
+        except Exception as e:
+            print(f"Error searching index: {str(e)}")
+            return []
+    
+    def save_index(self, filepath="vector_index.faiss"):
+        """Save FAISS index to file"""
+        if self.index is None:
+            print("No index to save!")
+            return False
+            
+        try:
+            faiss.write_index(self.index, filepath)
+            
+            # Save chunks separately
+            chunks_filepath = filepath.replace('.faiss', '_chunks.pkl')
+            with open(chunks_filepath, 'wb') as f:
+                pickle.dump({
+                    'chunks': self.chunks,
+                    'dimension': self.dimension
+                }, f)
+                
+            print(f"Index saved to {filepath}")
+            print(f"Chunks saved to {chunks_filepath}")
+            return True
+            
+        except Exception as e:
+            print(f"Error saving index: {str(e)}")
+            return False
+    
+    def load_index(self, filepath="vector_index.faiss"):
+        """Load FAISS index from file"""
+        chunks_filepath = filepath.replace('.faiss', '_chunks.pkl')
+        
+        if not os.path.exists(filepath) or not os.path.exists(chunks_filepath):
+            print(f"Index files not found: {filepath} or {chunks_filepath}")
+            return False
+            
+        try:
+            # Load index
+            self.index = faiss.read_index(filepath)
+            
+            # Load chunks
+            with open(chunks_filepath, 'rb') as f:
+                data = pickle.load(f)
+            
+            self.chunks = data['chunks']
+            self.dimension = data['dimension']
+            
+            print(f"Index loaded from {filepath}")
+            print(f"Loaded {len(self.chunks)} chunks, index contains {self.index.ntotal} vectors")
+            return True
+            
+        except Exception as e:
+            print(f"Error loading index: {str(e)}")
+            return False
+
+# Test the Vector Database
+print("\n" + "="*50)
+print("Testing Vector Database...")
+vector_db = VectorDatabase()
+print("Vector Database initialized!")
+
+
 # Test the Embedding Manager
 print("\n" + "="*50)
 print("Testing Embedding Manager...")
@@ -203,4 +334,62 @@ if len(chunks) > 0:
         print("❌ Failed to load embedding model")
 else:
     print("❌ No chunks available for testing")
+
+
+# Test vector database with existing embeddings
+print("\n" + "="*50)
+print("Testing Vector Database operations...")
+
+if embedding_manager.embeddings is not None and len(embedding_manager.chunks) > 0:
+    # Build index
+    if vector_db.build_index(embedding_manager.embeddings, embedding_manager.chunks):
+        print("✅ Vector index built successfully!")
+        
+        # Test search functionality
+        print("\nTesting search functionality...")
+        
+        # Create a test query (use first chunk as query for testing)
+        test_query = "sample document testing"
+        print(f"Test query: '{test_query}'")
+        
+        # Generate embedding for test query
+        query_embedding = embedding_manager.model.encode([test_query])[0]
+        
+        # Search for similar chunks
+        results = vector_db.search(query_embedding, k=2)
+        
+        if results:
+            print("✅ Search completed successfully!")
+            for result in results:
+                print(f"Rank {result['rank']}: Score {result['score']:.4f}")
+                print(f"Chunk: {result['chunk'][:100]}...")
+                print("-" * 50)
+        else:
+            print("❌ No search results found")
+            
+        # Test saving and loading index
+        print("\nTesting save/load functionality...")
+        if vector_db.save_index("test_vector_index.faiss"):
+            print("✅ Index saved successfully!")
+            
+            # Test loading
+            new_vector_db = VectorDatabase()
+            if new_vector_db.load_index("test_vector_index.faiss"):
+                print("✅ Index loaded successfully!")
+                
+                # Test search on loaded index
+                test_results = new_vector_db.search(query_embedding, k=1)
+                if test_results:
+                    print("✅ Search on loaded index works!")
+                else:
+                    print("❌ Search on loaded index failed")
+            else:
+                print("❌ Failed to load index")
+        else:
+            print("❌ Failed to save index")
+    else:
+        print("❌ Failed to build vector index")
+else:
+    print("❌ No embeddings available for testing")
+
 
